@@ -27,6 +27,8 @@ int main(int argc, char **argv)
 	unsigned char *empty;
 	int i, c ;
 	unsigned int free, nonzero ;
+	double percent ;
+	int old_percent ;
 	int verbose = 0 ;
 	int dryrun = 0 ;
 
@@ -91,6 +93,13 @@ int main(int argc, char **argv)
 	}
 
 	free = nonzero = 0 ;
+	percent = 0.0 ;
+	old_percent = -1 ;
+
+	if ( verbose ) {
+		fprintf(stderr, "\r%4.1f%%", percent) ;
+	}
+
 	for ( blk=current_fs->super->s_first_data_block;
 			blk < current_fs->super->s_blocks_count; blk++ ) {
 
@@ -99,6 +108,14 @@ int main(int argc, char **argv)
 		}
 
 		++free ;
+
+		percent = 100.0 * (double)free/
+					(double)current_fs->super->s_free_blocks_count ;
+
+		if ( verbose && (int)(percent*10) != old_percent ) {
+			fprintf(stderr, "\r%4.1f%%", percent) ;
+			old_percent = (int)(percent*10) ;
+		}
 
 		ret = io_channel_read_blk(current_fs->io, blk, 1, buf);
 		if ( ret ) {
@@ -128,7 +145,7 @@ int main(int argc, char **argv)
 	}
 
 	if ( verbose ) {
-		printf("%u/%u/%u\n", nonzero, free,
+		printf("\r%u/%u/%u\n", nonzero, free,
 				current_fs->super->s_blocks_count) ;
 	}
 
