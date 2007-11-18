@@ -5,6 +5,11 @@
  *
  * This file may be redistributed under the terms of the GNU General Public
  * License.
+ *
+ * Changes:
+ *
+ * 2007-08-12  Allow use on filesystems mounted read-only.   Patch from
+ *             Jan Krämer.
  */
 
 #include <ext2fs/ext2fs.h>
@@ -58,8 +63,8 @@ int main(int argc, char **argv)
 		return 1 ;
 	}
 
-	if ( flags & EXT2_MF_MOUNTED ) {
-		fprintf(stderr, "%s: filesystem %s is mounted\n",
+	if ( (flags & EXT2_MF_MOUNTED) && !(flags & EXT2_MF_READONLY) ) {
+		fprintf(stderr, "%s: filesystem %s is mounted rw\n",
 					argv[0], argv[optind]) ;
 		return 1 ;
 	}
