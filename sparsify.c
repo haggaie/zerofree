@@ -159,6 +159,12 @@ int main(int argc, char **argv)
 			continue ;
 		}
 
+		if ( inode.i_flags & EXT4_EXTENTS_FL ) {
+			fprintf(stderr, "%s: unable to process %s, it uses extents\n",
+					argv[0], argv[i]);
+			continue;
+		}
+
 		pdata.inode = &inode ;
 		pdata.dryrun = dryrun ;
 		pdata.changed = 0 ;
