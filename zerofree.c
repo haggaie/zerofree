@@ -8,6 +8,7 @@
  *
  * Changes:
  *
+ * 2010-10-17  Allow non-zero fill value.   Patch from Jacob Nevins.
  * 2007-08-12  Allow use on filesystems mounted read-only.   Patch from
  *             Jan Krämer.
  */
@@ -16,8 +17,9 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#include <stdlib.h>
 
-#define USAGE "usage: %s [-n] [-v] filesystem\n"
+#define USAGE "usage: %s [-n] [-v] [-f fillval] filesystem\n"
 
 int main(int argc, char **argv)
 {
@@ -31,19 +33,33 @@ int main(int argc, char **argv)
 	unsigned char *buf;
 	unsigned char *empty;
 	int i, c ;
-	unsigned int free, nonzero ;
+	unsigned int free, modified ;
 	double percent ;
 	int old_percent ;
+	unsigned int fillval = 0 ;
 	int verbose = 0 ;
 	int dryrun = 0 ;
 
-	while ( (c=getopt(argc, argv, "nv")) != -1 ) {
+	while ( (c=getopt(argc, argv, "nvf:")) != -1 ) {
 		switch (c) {
 		case 'n' :
 			dryrun = 1 ;
 			break ;
 		case 'v' :
 			verbose = 1 ;
+			break ;
+		case 'f' :
+			{
+				char *endptr;
+				fillval = strtol(optarg, &endptr, 0) ;
+				if ( !*optarg || *endptr ) {
+					fprintf(stderr, "%s: invalid argument to -f\n", argv[0]) ;
+					return 1 ;
+				} else if ( fillval > 0xFFu ) {
+					fprintf(stderr, "%s: fill value must be 0-255\n", argv[0]) ;
+					return 1 ;
+				}
+			}
 			break ;
 		default :
 			fprintf(stderr, USAGE, argv[0]) ;
@@ -77,13 +93,15 @@ int main(int argc, char **argv)
 		return 1 ;
 	}
 
-	empty = (unsigned char *)calloc(1, current_fs->blocksize) ;
+	empty = (unsigned char *)malloc(current_fs->blocksize) ;
 	buf = (unsigned char *)malloc(current_fs->blocksize) ;
 
 	if ( empty == NULL || buf == NULL ) {
 		fprintf(stderr, "%s: out of memory (surely not?)\n", argv[0]) ;
 		return 1 ;
 	}
+
+	memset(empty, fillval, current_fs->blocksize);
 
 	ret = ext2fs_read_inode_bitmap(current_fs);
 	if ( ret ) {
@@ -97,7 +115,7 @@ int main(int argc, char **argv)
 		return 1 ;
 	}
 
-	free = nonzero = 0 ;
+	free = modified = 0 ;
 	percent = 0.0 ;
 	old_percent = -1 ;
 
@@ -129,7 +147,7 @@ int main(int argc, char **argv)
 		}
 
 		for ( i=0; i < current_fs->blocksize; ++i ) {
-			if ( buf[i] ) {
+			if ( buf[i] != fillval ) {
 				break ;
 			}
 		}
@@ -138,7 +156,7 @@ int main(int argc, char **argv)
 			continue ;
 		}
 
-		++nonzero ;
+		++modified ;
 
 		if ( !dryrun ) {
 			ret = io_channel_write_blk(current_fs->io, blk, 1, empty) ;
@@ -150,7 +168,7 @@ int main(int argc, char **argv)
 	}
 
 	if ( verbose ) {
-		printf("\r%u/%u/%u\n", nonzero, free,
+		printf("\r%u/%u/%u\n", modified, free,
 				current_fs->super->s_blocks_count) ;
 	}
 
