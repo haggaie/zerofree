@@ -1,7 +1,7 @@
 /*
  * sparsify - a tool to make files on an ext2 filesystem sparse
  *
- * Copyright (C) 2004 R M Yorston
+ * Copyright (C) 2004-2012 R M Yorston
  *
  * This file may be redistributed under the terms of the GNU General Public
  * License.
@@ -16,8 +16,12 @@
 struct process_data {
 	struct ext2_inode *inode ;
 	unsigned char *buf;
+	int verbose;
 	int dryrun ;
-	int changed ;
+	blk_t count;
+	blk_t blocks;
+	blk_t total_blocks;
+	int old_percent;
 } ;
 
 static int process(ext2_filsys fs, blk_t *blocknr, e2_blkcnt_t blockcnt,
@@ -29,6 +33,7 @@ static int process(ext2_filsys fs, blk_t *blocknr, e2_blkcnt_t blockcnt,
 
 	p = (struct process_data *)priv ;
 
+	p->blocks++;
 	if ( blockcnt >= 0 ) {
 		ret = io_channel_read_blk(fs->io, *blocknr, 1, p->buf);
 		if ( ret ) {
@@ -41,20 +46,34 @@ static int process(ext2_filsys fs, blk_t *blocknr, e2_blkcnt_t blockcnt,
 			}
 		}
 
-		if ( i == fs->blocksize && !p->dryrun ) {
-			ext2fs_unmark_block_bitmap(fs->block_map, *blocknr) ;
-			group = ext2fs_group_of_blk(fs, *blocknr);
-			fs->group_desc[group].bg_free_blocks_count++;
-			fs->super->s_free_blocks_count++ ;
-			/* the inode counts blocks of 512 bytes */
-			p->inode->i_blocks  -= fs->blocksize / 512 ;
-			*blocknr = 0 ;
-			/* direct blocks need to be zeroed in the inode */
-			if ( blockcnt < EXT2_NDIR_BLOCKS ) {
-				p->inode->i_block[blockcnt] = 0 ;
+		if ( i == fs->blocksize ) {
+			p->count++;
+			
+			if ( !p->dryrun ) {
+				ext2fs_unmark_block_bitmap(fs->block_map, *blocknr) ;
+				group = ext2fs_group_of_blk(fs, *blocknr);
+				fs->group_desc[group].bg_free_blocks_count++;
+				fs->super->s_free_blocks_count++ ;
+				/* the inode counts blocks of 512 bytes */
+				p->inode->i_blocks  -= fs->blocksize / 512 ;
+				*blocknr = 0 ;
+				/* direct blocks need to be zeroed in the inode */
+				if ( blockcnt < EXT2_NDIR_BLOCKS ) {
+					p->inode->i_block[blockcnt] = 0 ;
+				}
+				return BLOCK_CHANGED ;
 			}
-			p->changed = 1 ;
-			return BLOCK_CHANGED ;
+		}
+
+		if ( p->verbose ) {
+			double percent;
+
+			percent = 100.0 * (double)p->blocks/(double)p->total_blocks;
+
+			if ( (int)(percent*10) != p->old_percent ) {
+				fprintf(stderr, "\r%4.1f%%", percent);
+				p->old_percent = (int)(percent*10);
+			}
 		}
 	}
 
@@ -69,6 +88,7 @@ int main(int argc, char **argv)
 	int flags ;
 	int superblock = 0 ;
 	int open_flags = EXT2_FLAG_RW ;
+	int iter_flags = 0;
 	int blocksize = 0 ;
 	ext2_filsys current_fs = NULL;
 	struct ext2_inode inode ;
@@ -80,6 +100,7 @@ int main(int argc, char **argv)
 		switch (c) {
 		case 'n' :
 			dryrun = 1 ;
+			iter_flags |= BLOCK_FLAG_READ_ONLY;
 			break ;
 		case 'v' :
 			verbose = 1 ;
@@ -137,10 +158,6 @@ int main(int argc, char **argv)
 	root = cwd = EXT2_ROOT_INO ;
 
 	for ( i=optind+1; i<argc; ++i ) {
-		if ( verbose ) {
-			printf("processing %s\n", argv[i]) ;
-		}
-
 		ret = ext2fs_namei(current_fs, root, cwd, argv[i], &inum) ;
 		if ( ret ) {
 			fprintf(stderr, "%s: failed to find file %s\n", argv[0], argv[i]) ;
@@ -154,7 +171,7 @@ int main(int argc, char **argv)
 		}
 
 		if ( !ext2fs_inode_has_valid_blocks(&inode) ) {
-			fprintf(stderr, "%s: file %s has no valid inodes\n", argv[0],
+			fprintf(stderr, "%s: file %s has no valid blocks\n", argv[0],
 					argv[i]) ;
 			continue ;
 		}
@@ -165,18 +182,25 @@ int main(int argc, char **argv)
 			continue;
 		}
 
+		if ( verbose ) {
+			printf("processing %s\n", argv[i]) ;
+		}
+
 		pdata.inode = &inode ;
+		pdata.verbose = verbose;
 		pdata.dryrun = dryrun ;
-		pdata.changed = 0 ;
-		ret = ext2fs_block_iterate2(current_fs, inum, BLOCK_FLAG_DATA_ONLY,
-				NULL, process, &pdata) ;
+		pdata.count = pdata.blocks = 0;
+		pdata.total_blocks = inode.i_blocks/(current_fs->blocksize >> 9);
+		pdata.old_percent = 1000;
+		ret = ext2fs_block_iterate2(current_fs, inum, iter_flags, NULL,
+				process, &pdata) ;
 		if ( ret ) {
 			fprintf(stderr, "%s: failed to process file %s\n", argv[0],
 					argv[i]) ;
 			continue ;
 		}
 
-		if ( pdata.changed ) {
+		if ( pdata.count && !dryrun ) {
 			ret = ext2fs_write_inode(current_fs, inum, &inode) ;
 			if ( ret ) {
 				fprintf(stderr, "%s: failed to write inode data %s\n", argv[0],
@@ -186,6 +210,11 @@ int main(int argc, char **argv)
 
 			ext2fs_mark_bb_dirty(current_fs) ;
 			ext2fs_mark_super_dirty(current_fs) ;
+		}
+
+		if ( verbose ) {
+			printf("\r%d/%d/%d %s\n", pdata.count, pdata.blocks,
+					pdata.total_blocks, argv[i]);
 		}
 	}
 
