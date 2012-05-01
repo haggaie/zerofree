@@ -100,7 +100,9 @@ int main(int argc, char **argv)
 		switch (c) {
 		case 'n' :
 			dryrun = 1 ;
+#if defined(BLOCK_FLAG_READ_ONLY)
 			iter_flags |= BLOCK_FLAG_READ_ONLY;
+#endif
 			break ;
 		case 'v' :
 			verbose = 1 ;
@@ -176,11 +178,13 @@ int main(int argc, char **argv)
 			continue ;
 		}
 
+#if defined(EXT4_EXTENTS_FL)
 		if ( inode.i_flags & EXT4_EXTENTS_FL ) {
 			fprintf(stderr, "%s: unable to process %s, it uses extents\n",
 					argv[0], argv[i]);
 			continue;
 		}
+#endif
 
 		if ( verbose ) {
 			printf("processing %s\n", argv[i]) ;
