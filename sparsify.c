@@ -21,6 +21,11 @@
 #define API 141
 #endif
 
+#if defined(EXT2_FLAG_64BITS)
+#undef API
+#define API 142
+#endif
+
 struct process_data {
 	unsigned char *buf;
 	int verbose;
@@ -60,11 +65,17 @@ static int process(ext2_filsys fs, blk_t *blocknr, e2_blkcnt_t blockcnt,
 			if ( !p->dryrun ) {
 				ext2fs_unmark_block_bitmap(fs->block_map, *blocknr);
 				group = ext2fs_group_of_blk(fs, *blocknr);
+#if API >= 142
+				ext2fs_bg_free_blocks_count_set(fs, group,
+							ext2fs_bg_free_blocks_count(fs, group)+1);
+				ext2fs_free_blocks_count_add(fs->super, (blk64_t)1);
+#else
 				fs->group_desc[group].bg_free_blocks_count++;
+				fs->super->s_free_blocks_count++;
+#endif
 #if API >= 141
 				ext2fs_group_desc_csum_set(fs, group);
 #endif
-				fs->super->s_free_blocks_count++;
 				*blocknr = 0;
 				ret = BLOCK_CHANGED;
 			}
