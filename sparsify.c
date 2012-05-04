@@ -13,6 +13,14 @@
 
 #define USAGE "usage: %s [-n] [-v] filesystem filename ...\n"
 
+/* initially assume pre-ext4 API version */
+#define API 140
+
+#if defined(BLOCK_FLAG_READ_ONLY)
+#undef API
+#define API 141
+#endif
+
 struct process_data {
 	unsigned char *buf;
 	int verbose;
@@ -53,6 +61,9 @@ static int process(ext2_filsys fs, blk_t *blocknr, e2_blkcnt_t blockcnt,
 				ext2fs_unmark_block_bitmap(fs->block_map, *blocknr);
 				group = ext2fs_group_of_blk(fs, *blocknr);
 				fs->group_desc[group].bg_free_blocks_count++;
+#if API >= 141
+				ext2fs_group_desc_csum_set(fs, group);
+#endif
 				fs->super->s_free_blocks_count++;
 				*blocknr = 0;
 				ret = BLOCK_CHANGED;
@@ -172,7 +183,7 @@ int main(int argc, char **argv)
 			continue;
 		}
 
-#if defined(EXT4_EXTENTS_FL)
+#if defined(EXT4_EXTENTS_FL) && API < 141
 		if ( inode.i_flags & EXT4_EXTENTS_FL ) {
 			fprintf(stderr, "%s: unable to process %s, it uses extents\n",
 					argv[0], argv[i]);
@@ -208,7 +219,16 @@ int main(int argc, char **argv)
 				continue;
 			}
 
+#if API >= 141
+			ret = ext2fs_iblk_sub_blocks(fs, &inode, (blk64_t)pdata.count);
+			if ( ret ) {
+				fprintf(stderr, "%s: failed to update block count (%s)\n",
+						argv[0], argv[i]);
+				continue;
+			}
+#else
 			inode.i_blocks -= pdata.count * (fs->blocksize >> 9);
+#endif
 
 			ret = ext2fs_write_inode(fs, inum, &inode);
 			if ( ret ) {
