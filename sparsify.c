@@ -202,6 +202,15 @@ int main(int argc, char **argv)
 		}
 #endif
 
+#if defined(EXT4_FEATURE_RO_COMPAT_HUGE_FILE) && defined(EXT4_HUGE_FILE_FL)
+		if ( (fs->super->s_feature_ro_compat & EXT4_FEATURE_RO_COMPAT_HUGE_FILE)
+				&& (inode.i_flags & EXT4_HUGE_FILE_FL) ) {
+			fprintf(stderr, "%s: unable to process %s, it's huge\n",
+					argv[0], argv[i]);
+			continue;
+		}
+#endif
+
 		if ( verbose ) {
 			printf("processing %s\n", argv[i]);
 		}
