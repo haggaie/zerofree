@@ -19,7 +19,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define USAGE "usage: %s [-n] [-v] [-f fillval] filesystem\n"
+#define USAGE "usage: %s [-n] [-v] [-d] [-f fillval] filesystem\n"
 
 int main(int argc, char **argv)
 {
@@ -39,14 +39,18 @@ int main(int argc, char **argv)
 	unsigned int fillval = 0;
 	int verbose = 0;
 	int dryrun = 0;
+	int discard = 0;
 
-	while ( (c=getopt(argc, argv, "nvf:")) != -1 ) {
+	while ( (c=getopt(argc, argv, "nvdf:")) != -1 ) {
 		switch (c) {
 		case 'n' :
 			dryrun = 1;
 			break;
 		case 'v' :
 			verbose = 1;
+			break;
+		case 'd':
+			discard = 1;
 			break;
 		case 'f' :
 			{
@@ -140,29 +144,39 @@ int main(int argc, char **argv)
 			old_percent = (int)(percent*10);
 		}
 
-		ret = io_channel_read_blk(fs->io, blk, 1, buf);
-		if ( ret ) {
-			fprintf(stderr, "%s: error while reading block\n", argv[0]);
-			return 1;
-		}
-
-		for ( i=0; i < fs->blocksize; ++i ) {
-			if ( buf[i] != fillval ) {
-				break;
+		if (!discard) {
+			ret = io_channel_read_blk(fs->io, blk, 1, buf);
+			if ( ret ) {
+				fprintf(stderr, "%s: error while reading block\n", argv[0]);
+				return 1;
 			}
-		}
 
-		if ( i == fs->blocksize ) {
-			continue;
+			for ( i=0; i < fs->blocksize; ++i ) {
+				if ( buf[i] != fillval ) {
+					break;
+				}
+			}
+
+			if ( i == fs->blocksize ) {
+				continue;
+			}
 		}
 
 		++modified;
 
 		if ( !dryrun ) {
-			ret = io_channel_write_blk(fs->io, blk, 1, empty);
-			if ( ret ) {
-				fprintf(stderr, "%s: error while writing block\n", argv[0]);
-				return 1;
+			if (!discard) {
+				ret = io_channel_write_blk(fs->io, blk, 1, empty);
+				if ( ret ) {
+					fprintf(stderr, "%s: error while writing block\n", argv[0]);
+					return 1;
+				}
+			} else { /* discard */
+				ret = io_channel_discard(fs->io, blk, 1);
+				if ( ret ) {
+					fprintf(stderr, "%s: error while discarding block\n", argv[0]);
+					return 1;
+				}
 			}
 		}
 	}
