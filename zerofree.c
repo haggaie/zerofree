@@ -7,7 +7,7 @@
  * License, version 2.
  *
  * Changes:
- *
+ * 2014-11-22  Fix memory leak. Tuan T. Pham
  * 2010-10-17  Allow non-zero fill value.   Patch from Jacob Nevins.
  * 2007-08-12  Allow use on filesystems mounted read-only.   Patch from
  *             Jan Krämer.
@@ -21,6 +21,8 @@
 
 #define USAGE "usage: %s [-n] [-v] [-d] [-f fillval] filesystem\n"
 
+void bailout(void* mem0, void* mem1) __attribute__ ((noreturn));
+
 int main(int argc, char **argv)
 {
 	errcode_t ret;
@@ -33,7 +35,7 @@ int main(int argc, char **argv)
 	unsigned char *buf;
 	unsigned char *empty;
 	int i, c;
-	unsigned int free, modified;
+	unsigned int free_blk, modified;
 	double percent;
 	int old_percent;
 	unsigned int fillval = 0;
@@ -110,7 +112,7 @@ int main(int argc, char **argv)
 	ret = ext2fs_read_inode_bitmap(fs);
 	if ( ret ) {
 		fprintf(stderr, "%s: error while reading inode bitmap\n", argv[0]);
-		return 1;
+		bailout((void*) empty, (void*) buf);
 	}
 
 	ret = ext2fs_read_block_bitmap(fs);
@@ -119,7 +121,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	free = modified = 0;
+	free_blk = modified = 0;
 	percent = 0.0;
 	old_percent = -1;
 
@@ -134,9 +136,9 @@ int main(int argc, char **argv)
 			continue;
 		}
 
-		++free;
+		++free_blk;
 
-		percent = 100.0 * (double)free/
+		percent = 100.0 * (double)free_blk/
 					(double)fs->super->s_free_blocks_count;
 
 		if ( verbose && (int)(percent*10) != old_percent ) {
@@ -169,27 +171,37 @@ int main(int argc, char **argv)
 				ret = io_channel_write_blk(fs->io, blk, 1, empty);
 				if ( ret ) {
 					fprintf(stderr, "%s: error while writing block\n", argv[0]);
-					return 1;
+					bailout((void*) empty, (void*) buf);
 				}
 			} else { /* discard */
 				ret = io_channel_discard(fs->io, blk, 1);
 				if ( ret ) {
 					fprintf(stderr, "%s: error while discarding block\n", argv[0]);
-					return 1;
+					bailout((void*) empty, (void*) buf);
 				}
 			}
 		}
 	}
 
 	if ( verbose ) {
-		printf("\r%u/%u/%u\n", modified, free, fs->super->s_blocks_count);
+		printf("\r%u/%u/%u\n", modified, free_blk, fs->super->s_blocks_count);
 	}
 
 	ret = ext2fs_close(fs);
 	if ( ret ) {
 		fprintf(stderr, "%s: error while closing filesystem\n", argv[0]);
-		return 1;
+		bailout((void*) empty, (void*) buf);
 	}
 
+	free(buf);
+	free(empty);
 	return 0;
+}
+
+
+void bailout(void* mem0, void* mem1)
+{
+	free(mem0);
+	free(mem1);
+	exit(1);
 }
